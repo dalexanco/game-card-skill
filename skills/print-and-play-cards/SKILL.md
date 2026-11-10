@@ -12,6 +12,7 @@ Guide the user through a fixed workflow:
 1. **Card template** — pick one of the base card templates and a card format.
 2. **Rules** — gather the rough rules, fill gaps from rule templates, check coherence and balance.
 3. **Design** — theme, palette, fonts, sizes, layout, optional card back.
-4. **Cards** — write the card data, validate, build the printable sheets, iterate.
-5. **Rules sheet** — write a concise, standardized rules sheet that fits a card (or a 2×2 fold).
-6. **Print** — remind the user of the printing instructions.
+4. **Test card** — render one worst-case card per type at real size, fix warnings, get user sign-off.
+5. **Cards** — write the full card data, validate, build the printable sheets, iterate.
+6. **Rules sheet** — write a concise, standardized rules sheet that fits a card (or a 2×2 fold).
+7. **Print** — remind the user of the printing instructions.

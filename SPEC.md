@@ -9,7 +9,7 @@ Skill d'agent (installable via `npx skills add dalexanco/game-card-skill`) qui a
 ## 1. Objectifs et périmètre
 
 ### Objectifs
-- Guider l'utilisateur à travers un parcours **fixe** : template → règles → design → génération des cartes → planche de règles → impression.
+- Guider l'utilisateur à travers un parcours **fixe** : template → règles → design → **carte test** → génération des cartes → planche de règles → impression.
 - Fournir des **ressources d'exemple** (templates de cartes, templates de règles, thèmes, guidelines) que l'agent ne lit **qu'à la demande** (divulgation progressive).
 - Produire des fichiers HTML imprimables dont les cartes ont **la taille exacte** une fois imprimées à 100 %.
 - Garantir des règles **cohérentes et équilibrées**, et une planche de règles **concise et normée**.
@@ -18,7 +18,7 @@ Skill d'agent (installable via `npx skills add dalexanco/game-card-skill`) qui a
 ### Hors périmètre (v1)
 - Génération de PDF/PNG (le HTML imprimable via le navigateur suffit).
 - Formats de papier autres que A4.
-- Génération d'images par IA (illustrations = emojis, icônes, ou images fournies par l'utilisateur).
+- Appel direct à une API de génération d'images par IA. En v1, les images IA passent par un export de prompts (§10.5).
 - Versionnement des itérations (git s'en charge si l'utilisateur le souhaite).
 
 ---
@@ -89,6 +89,7 @@ game-card-skill/
             ├── typography.md              # grille, marges de sécurité, tailles, hiérarchie
             ├── ages.md                    # règles par tranche d'âge
             ├── icons.md                   # emojis + bibliothèques d'icônes
+            ├── illustrations.md           # sources d'illustration, DiceBear, compatibilité coloriage
             ├── balance.md                 # check-list de cohérence et d'équilibrage
             └── rules-sheet.md             # standard de rédaction de la planche de règles
 ```
@@ -106,6 +107,8 @@ Le dossier `skills/card-generator/` créé lors du scaffolding initial est renom
 | Validation | **zod** | Messages d'erreur exploitables par l'agent (`ppc validate`) |
 | Rendu HTML côté CLI | **linkedom** | Remplit les `data-zone` et assemble les planches sans navigateur |
 | Surveillance de fichiers | **chokidar** | Rechargement fiable de l'aperçu sur macOS, Linux et Windows |
+| Illustrations procédurales | **@dicebear/core** + styles retenus (§10.5.3) | SVG déterministes à partir d'une graine, compilés dans le bundle |
+| Vectorisation (v1.1) | **potrace** (portage JS) | Conversion d'images bitmap en dessin au trait pour le mode coloriage |
 | Tests | **vitest** ; **Playwright** (dev seulement) | Tests unitaires, plus une mesure des cartes en mm dans un rendu PDF |
 
 Règles de build :
@@ -126,12 +129,15 @@ games/<slug>/
 ├── design.md          # intention de design : thème, palette, polices, disposition
 ├── cards.json         # données des cartes (généré par l'agent)
 ├── rules-sheet.json   # texte de la planche de règles, par section imposée (§9.1)
+├── assets/            # illustrations : fichiers utilisateur, images IA importées, SVG dessinés par l'agent
+├── prompts.md         # prompts d'illustration exportés (§10.5.2), si utilisés
 ├── template/          # copie du template de carte, modifiable librement par l'agent
 │   ├── card.html
 │   ├── card.css
 │   ├── back.html
 │   └── theme.css
 └── print/
+    ├── sample.html    # carte test : échantillon à taille réelle + alertes (étape 4)
     ├── cards.html     # planches de cartes (rectos, + versos miroirs si activés)
     └── rules.html     # planche de règles
 ```
@@ -161,21 +167,34 @@ L'ordre est imposé. Chaque étape se termine par une **validation explicite** d
 - En sortie : `rules.md` validé, avec la composition du deck (types de cartes, quantités).
 
 ### Étape 3 — Design
-- Le wizard propose les **5 thèmes** (aperçu sur le template choisi), la palette (modifiable), les polices, les tailles, les variantes de disposition, l'activation du **verso** et le **mode coloriage** (§10.1.1).
+- Le wizard propose les **5 thèmes** (aperçu sur le template choisi), la palette (modifiable), les polices, les tailles, les variantes de disposition, l'activation du **verso**, le **mode coloriage** (§10.1.1) et la **source d'illustration par défaut** (§10.5), avec un aperçu des styles DiceBear filtrés selon leur compatibilité coloriage.
 - L'agent lit `templates/themes/INDEX.md`, puis le thème choisi, `templates/layouts/<template>.md`, `references/typography.md`, et `references/icons.md` si des icônes sont demandées.
 - En sortie : `design.md` et `template/theme.css`. L'agent peut adapter `card.html` et `card.css` à cette étape.
 
-### Étape 4 — Génération des cartes (itération)
-- L'agent écrit `cards.json` à partir de `rules.md` et `design.md` : textes, emojis/icônes, quantités.
+### Étape 4 — Carte test
+Objectif : valider le rendu sur **un échantillon** avant d'écrire tout le deck, pour ne pas corriger 50 cartes à cause d'un défaut de template ou de thème.
+
+- L'agent écrit dans `cards.json` uniquement les **cartes d'échantillon** (`"sample": true`) : **une carte par type**, en choisissant pour chaque type la plus chargée (texte le plus long, le plus d'icônes). C'est le pire cas du débordement.
+- `ppc validate`, puis `ppc build --sample`, qui génère `print/sample.html` :
+  - les cartes d'échantillon à **taille réelle**, avec leur verso si celui-ci est activé ;
+  - la règle de calibration de 50 mm ;
+  - une version en mode coloriage si ce mode est activé ;
+  - les **alertes du moteur** : texte qui déborde, texte sous la taille minimale de la tranche d'âge, contenu hors zone de sécurité, contraste insuffisant.
+- L'aperçu ajoute un onglet « Carte test » avec un zoom à 100 % (taille réelle à l'écran, calibrable) et une superposition optionnelle de la **zone de sécurité** et de la **grille**.
+- L'agent invite l'utilisateur à **imprimer `sample.html`** pour vérifier la taille, la lisibilité et les couleurs sur sa propre imprimante (recommandé, pas obligatoire).
+- On itère sur le template, le thème et les textes jusqu'à validation (`steps.sample.validated = true`). L'étape suivante est bloquée tant que l'échantillon n'est pas validé et que des alertes bloquantes subsistent (débordement, taille minimale).
+
+### Étape 5 — Génération des cartes (itération)
+- L'agent complète `cards.json` à partir de `rules.md` et `design.md` (textes, illustrations, quantités), en conservant les cartes d'échantillon validées.
 - L'agent lance `node <skill>/bin/ppc.mjs validate --game games/<slug>`, corrige les erreurs signalées, puis lance `build`, qui génère `print/cards.html` (voir §6). L'aperçu se recharge automatiquement.
 - L'agent ne doit **jamais** écrire `print/*.html` à la main : l'imposition et les dimensions viennent exclusivement du moteur.
 - On itère ensuite en chat : retouches de cartes, de template ou de thème. Chaque régénération écrase `print/`.
 
-### Étape 5 — Planche de règles
+### Étape 6 — Planche de règles
 - L'agent rédige les règles selon `references/rules-sheet.md` (voir §9) dans `rules-sheet.json` (une entrée par section imposée), puis lance `build`, qui génère `print/rules.html`.
 - Le support est choisi automatiquement (voir §9.3).
 
-### Étape 6 — Impression
+### Étape 7 — Impression
 - L'agent rappelle les consignes d'impression (§6.4) et liste les fichiers produits.
 
 ---
@@ -194,7 +213,7 @@ L'ordre est imposé. Chaque étape se termine par une **validation explicite** d
 | --- | --- |
 | `GET /` | Redirige vers `/wizard` |
 | `GET /wizard` | UI du wizard (étapes 1 à 3), pré-remplie depuis `game.json` |
-| `GET /preview` | Aperçu : onglets « Cartes », « Versos », « Règles », zoom, bascule « carte seule / planche » |
+| `GET /preview` | Aperçu : onglets « Carte test », « Cartes », « Versos », « Règles », zoom (dont 100 % taille réelle), bascule « carte seule / planche », superposition zone de sécurité / grille, liste des alertes du moteur |
 | `GET /api/game` | Renvoie `game.json` |
 | `PUT /api/game` | Fusionne et enregistre les champs saisis dans `game.json` |
 | `GET /api/templates` | Liste des templates, thèmes, formats et tranches d'âge disponibles (pour le wizard) |
@@ -213,7 +232,7 @@ L'ordre est imposé. Chaque étape se termine par une **validation explicite** d
   "name": "Les Lapins de l'Espace",
   "slug": "lapins-espace",
   "language": "fr",
-  "steps": { "template": { "validated": true }, "rules": { "validated": false }, "design": {}, "cards": {}, "rulesSheet": {} },
+  "steps": { "template": { "validated": true }, "rules": { "validated": false }, "design": {}, "sample": {}, "cards": {}, "rulesSheet": {} },
   "card": { "template": "tcg", "format": "poker" },
   "rules": {
     "players": { "min": 2, "max": 4 },
@@ -440,13 +459,61 @@ L'âge pilote aussi les limites de mots de la planche de règles (−50 % pour `
   3. **Game-icons.net** (`@iconify-json/game-icons`) : plus de 4 000 icônes orientées jeu (épées, potions, dés…) ; licence CC BY 3.0, **attribution obligatoire** (à mentionner sur la planche de règles).
 - Le fichier précise une règle d'usage : une seule bibliothèque par jeu, en plus des emojis.
 
+### 10.5 Illustrations (`references/illustrations.md`)
+
+La zone `art` d'une carte est alimentée par une **source** déclarée dans `cards.json`. L'utilisateur choisit une source par défaut à l'étape Design (dans le wizard), et chaque carte peut la surcharger. L'agent ne lit `references/illustrations.md` que lorsqu'une source autre qu'emoji est demandée.
+
+#### 10.5.1 Sources
+
+| `art.kind` | Version | Principe | Champs |
+| --- | --- | --- | --- |
+| `emoji` | v1 | Composition : emoji principal, forme de fond, emojis secondaires optionnels | `main`, `accents[]`, `shape` |
+| `icon` | v1 | Icône d'une des bibliothèques de §10.4 | `lib`, `name` |
+| `svg` | v1 | SVG simple dessiné par l'agent, selon le guide de style du thème (palette, épaisseur de trait, cadrage), enregistré dans `assets/` | `file` |
+| `file` | v1 | Image fournie par l'utilisateur (glisser-déposer dans le wizard ou copie dans `assets/`) | `file`, `position` (`object-position`), `fit` |
+| `prompt` | v1 | Prompt pour une IA image externe (§10.5.2) ; tant que l'image n'est pas importée, rendu en repli | `prompt`, `file` (une fois importé) |
+| `dicebear` | v1 | Illustration procédurale DiceBear (§10.5.3) | `style`, `seed`, `options` |
+| `blank` | v1 | Zone à dessiner par les joueurs, avec un mot-guide optionnel | `hint` |
+| `trace` | v1.1 | Image bitmap (`file`, `prompt`) vectorisée en dessin au trait avec potrace | `source`, `threshold` |
+| — | plus tard | Banques d'illustrations libres (Open Peeps, Open Doodles, unDraw, Openclipart…) | — |
+| — | plus tard | Appel direct à une API d'images IA | — |
+
+Exemple :
+```json
+{ "id": "lapin-pilote", "type": "creature", "title": "Lapin pilote",
+  "art": { "kind": "dicebear", "style": "notionists", "seed": "lapin-pilote" } }
+```
+
+Règles communes :
+- Une seule source par type de carte est recommandée, pour la cohérence visuelle.
+- En cas d'échec d'une source (fichier absent, style incompatible), le moteur se replie sur `emoji` si un `fallbackEmoji` est fourni, sinon sur `blank`, et le signale dans `report.json`.
+- Les licences et attributions des sources (DiceBear selon le style, bibliothèques d'icônes) sont collectées automatiquement par `build` et ajoutées en pied de la planche de règles.
+
+#### 10.5.2 Export de prompts (IA image externe)
+- L'agent rédige un `prompt` par carte et un **préfixe de style commun** dans `design.md` (thème, palette, cadrage, « line art, no fill » en mode coloriage).
+- `ppc prompts export --game <dir>` écrit `prompts.md` : une entrée par carte, avec le nom de fichier attendu (`assets/<id>.png`) et le prompt complet.
+- L'utilisateur génère les images dans l'outil de son choix et les dépose dans `assets/`. `ppc prompts import` (ou le wizard) les associe aux cartes par nom de fichier.
+
+#### 10.5.3 DiceBear
+- **Rendu** : `ppc build` génère les SVG à partir de `style` + `seed` (déterministe : même graine, même image) et les intègre aux planches. Par défaut, la graine vaut l'`id` de la carte.
+- **Styles** : seul un sous-ensemble des 31 styles est embarqué, pour limiter la taille du bundle. Chaque style est référencé dans `references/illustrations.md` avec sa licence, ses options de couleur et sa **compatibilité coloriage** (`good`, `medium`, `none`).
+- **Mode coloriage**, en 3 niveaux appliqués dans cet ordre :
+  1. **Styles nativement au trait** (`notionists`, `open-peeps`, `croodles`, `lorelei`) : toutes les options de couleur (peau, cheveux, vêtements, fond) sont forcées en blanc. Compatibilité `good`, c'est le choix proposé en priorité. Les noms d'options par style sont à vérifier à l'implémentation.
+  2. **Styles en aplats** (`adventurer`, `bottts`, `big-smile`, `fun-emoji`…) : transformation vectorielle `outline`, sans passer par une image bitmap.
+     - Chaque forme est remplie en blanc et reçoit un contour noir (`--stroke-width`, `vector-effect: non-scaling-stroke`), en conservant l'ordre d'empilement pour que les formes du dessus masquent celles du dessous.
+     - Les petites formes sombres (yeux, bouche, sous un seuil de surface) restent en noir plein : ce sont déjà des traits.
+     - Les formes semi-transparentes, dégradés, reflets et ombres sont supprimés, pour éviter des contours parasites.
+     - Compatibilité `medium` : le résultat est montré à l'étape Carte test pour validation.
+  3. **Repli sur `blank`** : pour les styles notés `none`, ou si l'utilisateur le préfère. La zone à dessiner reprend le nom de la carte comme mot-guide.
+- **Bonus `pixel-art` → coloriage magique** (option `colorByNumber`) : chaque pixel devient une case numérotée au trait, avec une légende des couleurs (numéro → pastille) sur la carte ou sur la planche de règles. Recommandé pour la tranche `7-12`. Pour `≤6`, la grille est trop fine et le moteur émet une alerte.
+
 ---
 
 ## 11. `SKILL.md`
 
 Contenu attendu (en anglais, concis) :
 - Frontmatter : `name: print-and-play-cards`, et une `description` qui déclenche le skill sur « créer un jeu de cartes », « print and play », « cartes imprimables », « planche de cartes »…
-- Le parcours des étapes 0 à 6, avec pour chaque étape : ce que l'utilisateur fait dans le wizard, ce que l'agent fait en chat, les fichiers produits, et le critère de validation.
+- Le parcours des étapes 0 à 7, avec pour chaque étape : ce que l'utilisateur fait dans le wizard, ce que l'agent fait en chat, les fichiers produits, et le critère de validation.
 - **Table des ressources** : quel fichier lire, et à quel moment. Règle explicite : lire un `INDEX.md` avant tout fichier de son dossier, puis seulement les fichiers choisis.
 - Les commandes du CLI :
 
@@ -454,8 +521,9 @@ Contenu attendu (en anglais, concis) :
   | --- | --- |
   | `ppc serve --game <dir> [--port 4747]` | Wizard + aperçu |
   | `ppc validate --game <dir>` | Valide `game.json`, `cards.json` et `rules-sheet.json` (zod), plus les contrôles de cohérence automatisables (quantités, zones inconnues, débordements estimés) |
-  | `ppc build --game <dir>` | Génère `print/cards.html` et `print/rules.html` |
+  | `ppc build --game <dir> [--sample]` | Génère `print/cards.html` et `print/rules.html`, ou seulement `print/sample.html` avec `--sample`. Écrit les alertes du moteur dans `print/report.json` et les affiche dans la console |
   | `ppc init --game <dir> --name <nom>` | Crée le squelette du jeu |
+  | `ppc prompts export\|import --game <dir>` | Exporte les prompts d'illustration dans `prompts.md` / associe les images déposées dans `assets/` (§10.5.2) |
 
 - Si Node ≥ 20 est absent, l'agent le signale à l'utilisateur. Le skill ne prévoit pas de génération manuelle des planches de repli.
 - Les règles impératives : tailles en mm, zone de sécurité, check-list d'équilibrage, structure de la planche de règles.
@@ -472,6 +540,7 @@ Contenu attendu (en anglais, concis) :
 5. Pour chaque format, le nombre de cartes par planche correspond au tableau §6.1.
 6. Avec les versos activés, rectos et versos s'alignent en recto-verso bord long (miroir correct).
 7. Chaque template rend correctement avec chacun des 5 thèmes, sans couleur ni police codée en dur dans `card.css`.
+7ter. `ppc build --sample` produit une carte par type, signale un débordement provoqué volontairement dans `report.json`, et `build` (complet) refuse de s'exécuter tant que `steps.sample.validated` est faux.
 7bis. En mode coloriage, chaque combinaison template × thème ne contient aucun fond rempli autre que blanc (vérifié par un test Playwright sur les `background-color`/`fill` calculés), et les emojis utilisent Noto Emoji.
 8. La planche de règles contient exactement les sections de §9.1, dans l'ordre, et tient sur une carte recto-verso ou sur un pliage 2 × 2.
 9. Un parcours complet (de bout en bout) sur un jeu d'exemple produit un jeu jouable dont la check-list §8.2 passe.
@@ -482,4 +551,4 @@ Contenu attendu (en anglais, concis) :
 
 - **Tranches d'âge** : les bornes données (« moins de 6 ans », « 7-12 », « 12-99 ») laissent un trou à 6 ans et un chevauchement à 12 ans. La spec retient `≤6`, `7-12`, `12-99` (12 ans → `7-12`). À confirmer.
 - **Plusieurs dos** : un dos par type de carte (pioche ou défausse distincte) est-il utile dès la v1 ?
-- **Images utilisateur** : faut-il un emplacement `games/<slug>/assets/` pour des illustrations fournies, référencées par la zone `art` ?
+- **Styles DiceBear embarqués** : liste définitive à arrêter, en fonction de la taille du bundle et des licences de chaque style.

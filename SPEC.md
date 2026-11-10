@@ -161,7 +161,7 @@ L'ordre est imposé. Chaque étape se termine par une **validation explicite** d
 - En sortie : `rules.md` validé, avec la composition du deck (types de cartes, quantités).
 
 ### Étape 3 — Design
-- Le wizard propose les **5 thèmes** (aperçu sur le template choisi), la palette (modifiable), les polices, les tailles, les variantes de disposition, et l'activation du **verso**.
+- Le wizard propose les **5 thèmes** (aperçu sur le template choisi), la palette (modifiable), les polices, les tailles, les variantes de disposition, l'activation du **verso** et le **mode coloriage** (§10.1.1).
 - L'agent lit `templates/themes/INDEX.md`, puis le thème choisi, `templates/layouts/<template>.md`, `references/typography.md`, et `references/icons.md` si des icônes sont demandées.
 - En sortie : `design.md` et `template/theme.css`. L'agent peut adapter `card.html` et `card.css` à cette étape.
 
@@ -231,6 +231,7 @@ L'ordre est imposé. Chaque étape se termine par une **validation explicite** d
     "palette": { "primary": "#…", "secondary": "#…", "accent": "#…", "background": "#…", "text": "#…" },
     "fonts": { "title": "Luckiest Guy", "body": "Nunito" },
     "layout": "art-top",
+    "coloring": false,
     "back": { "enabled": true }
   }
 }
@@ -304,6 +305,7 @@ L'agent peut librement modifier sa copie dans `games/<slug>/template/`. Il doit 
   --line-height-body;
   /* forme */
   --radius; --border-width; --frame-padding;                /* en mm */
+  --stroke-width;                                           /* traits d'illustration/ornements, en pt (voir §10.1.1) */
   /* texture (optionnel) */
   --texture-background;
   /* grille */
@@ -396,6 +398,18 @@ Chaque thème fournit :
 
 `INDEX.md` contient une ligne par thème : description et tranches d'âge compatibles.
 
+### 10.1.1 Mode coloriage
+Le mode coloriage est une **option de rendu combinable avec tous les thèmes** (`design.coloring: true`). Ce n'est pas un thème séparé. Les cartes sont imprimées **au trait** pour être coloriées à la main : aucune forme n'est remplie.
+
+- **Activation** : l'imposition ajoute `data-mode="coloring"` sur la racine des planches. Chaque `theme.css` **doit** fournir un bloc `[data-mode="coloring"] { … }` qui redéfinit ses variables.
+- **Couleurs** : fonds et surfaces en blanc (`--color-background`, `--color-surface` → `#fff`), et tous les fonds remplis, dégradés et textures (`--texture-background`) désactivés. Seuls les traits et le texte restent, en noir ou en gris très foncé.
+- **Traits** : nouvelle variable `--stroke-width`, d'au moins 0,5 pt (au moins 1 pt pour la tranche `≤6`). Les zones à colorier sont **fermées** et assez grandes (au moins 5 mm pour `≤6`).
+- **Typographie** : texte de jeu en noir plein, pour rester lisible. Pour les titres, une police à contour ou un texte détouré (`-webkit-text-stroke` avec un remplissage transparent) est possible, mais jamais pour le texte de jeu ni pour les valeurs numériques.
+- **Icônes et emojis** : uniquement des versions au trait. Les emojis passent en police monochrome **Noto Emoji** (au lieu de Noto Color Emoji). Côté icônes : Lucide, ou Phosphor en graisse `regular`/`light`. Game-icons.net donne des silhouettes pleines : il est exclu de ce mode, sauf rendu en contour.
+- **Versos** : également au trait (motif à colorier).
+- **Wizard** : une case « Mode coloriage » à l'étape Design, avec l'aperçu mis à jour en direct.
+- **Thème** : le `README.md` de chaque thème décrit son rendu en mode coloriage (motifs de bordure au trait, cadres, ornements).
+
 ### 10.2 Tranches d'âge (`references/ages.md`)
 L'âge est un **axe indépendant du thème**. Il s'applique aux règles, aux textes et au design.
 
@@ -458,6 +472,7 @@ Contenu attendu (en anglais, concis) :
 5. Pour chaque format, le nombre de cartes par planche correspond au tableau §6.1.
 6. Avec les versos activés, rectos et versos s'alignent en recto-verso bord long (miroir correct).
 7. Chaque template rend correctement avec chacun des 5 thèmes, sans couleur ni police codée en dur dans `card.css`.
+7bis. En mode coloriage, chaque combinaison template × thème ne contient aucun fond rempli autre que blanc (vérifié par un test Playwright sur les `background-color`/`fill` calculés), et les emojis utilisent Noto Emoji.
 8. La planche de règles contient exactement les sections de §9.1, dans l'ordre, et tient sur une carte recto-verso ou sur un pliage 2 × 2.
 9. Un parcours complet (de bout en bout) sur un jeu d'exemple produit un jeu jouable dont la check-list §8.2 passe.
 
